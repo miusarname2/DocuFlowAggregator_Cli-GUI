@@ -1,5 +1,6 @@
 *.zip
 *.xlsx
 *.ods
+*.spec
 dist/*
 build/*
