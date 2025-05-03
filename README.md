@@ -1,8 +1,3 @@
-
-Below is the updated documentation reflecting all the new CLI & GUI features (multifile support, split mode, discount option, custom output folder, etc.). I’ve kept the trilingual layout (EN/中文/ES) and adjusted each section where needed.
-
----
-
 ## 🚀 Overview / 概览 / Visión General
 
 **English:**
