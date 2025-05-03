@@ -1,382 +1,194 @@
-## 🚀 Overview / 概览
+Pensó durante un par de segundos
 
-**English:**  
-Welcome to **DocuFlowAggregator**, your ultimate assistant for generating **Debit** and **Credit** sales reports! This project offers two complementary interfaces:
-- **Graphical UI** with **Flet** for a friendly, visual experience.  
-- **CLI** for terminal fans—just a couple of commands and your reports are ready.
 
-Both share the powerful **process_data** function, engineered to filter, clean, and summarize transactions in one go. Say goodbye to dull spreadsheets and supercharge your workflow!
-
-**中文：**  
-欢迎使用 **DocuFlowAggregator**，您生成 **借记** 和 **贷记** 销售报告的终极助手！本项目提供两种互补界面：  
-- **图形界面**（Flet）：直观友好，一键操作。  
-- **命令行界面**：终端爱好者的最爱，只需几行命令即可完成报告。
-
-两者都调用强大的 **process_data** 函数，一键筛选、清洗并汇总交易，告别枯燥表格，让流程焕然一新！
+Below is the updated documentation reflecting all the new CLI & GUI features (multifile support, split mode, discount option, custom output folder, etc.). I’ve kept the trilingual layout (EN/中文/ES) and adjusted each section where needed.
 
 ---
 
-## 📦 Installation / 安装
+## 🚀 Overview / 概览 / Visión General
 
 **English:**
-1. **Clone the repo**  
-   ```bash
-   git clone https://github.com/miusarname2/DocuFlowAggregator_Cli-GUI.git
-   cd DocuFlowAggregator
-   ```
-2. **Create & activate venv**  
-   ```bash
-   python -m venv venv
-   source venv/bin/activate   # Linux/macOS
-   venv\Scripts\activate      # Windows
-   ```
-3. **Install deps**  
-   ```bash
-   pip install -r requirements.txt
-   ```
-   > **Main:** `flet`, `pandas`, `tkinter`
+Welcome to **DocuFlowAggregator**, your all-in-one tool for **Debit**, **Credit** and now **Split (Negatives & Positives)** sales reports! Two ways to run it:
+
+* **GUI** (Flet + Tkinter) for a guided, visual workflow.
+* **CLI** for the terminal-lover, fully interactive with menus and prompts.
+
+Both interfaces share the same rock-solid processing logic (`process_data_internal_sync` in GUI, `process_data` in CLI), which filters, cleans, consolidates and aggregates your Excel data in one step—goodbye manual spreadsheets!
 
 **中文：**
-1. **克隆仓库**  
-   ```bash
-   git clone https://github.com/miusarname2/DocuFlowAggregator_Cli-GUI.git
-   cd DocuFlowAggregator
-   ```
-2. **创建并激活虚拟环境**  
-   ```bash
-   python -m venv venv
-   source venv/bin/activate   # Linux/macOS
-   venv\Scripts\activate      # Windows
-   ```
-3. **安装依赖**  
-   ```bash
-   pip install -r requirements.txt
-   ```
-   > **核心依赖：** `flet`、`pandas`、`tkinter`
+欢迎使用 **DocuFlowAggregator**，您的终极销售报告助手，支持 **借记 (Debito)**、**贷记 (Credito)** 和 **正负分离 (Split)** 模式！提供两种交互方式：
+
+* **图形界面**（Flet + Tkinter），引导式操作，无需命令行。
+* **命令行界面**，互动式菜单、灵活多文件处理。
+
+两者调用同一核心处理函数，可一键筛选、清洗、合并并汇总 Excel 数据，释放您的双手！
+
+**Español:**
+Bienvenido a **DocuFlowAggregator**, tu herramienta integral para reportes de **Débito**, **Crédito** y ahora **Negativos & Positivos (Split)**.
+
+* **GUI** (Flet + Tkinter): paso a paso visual.
+* **CLI**: menú interactivo en consola, con soporte para múltiples archivos.
+
+Ambas comparten la misma lógica de `process_data`, que filtra, limpia, consolida nombres, agrega montos y exporta listo para usar.
 
 ---
 
-## 🎨 Project Structure / 项目结构
+## 📦 Installation / 安装 / Instalación
+
+```bash
+git clone https://github.com/miusarname2/DocuFlowAggregator_Cli-GUI.git
+cd DocuFlowAggregator
+python -m venv venv
+# Linux/macOS:
+source venv/bin/activate
+# Windows:
+venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+> **Main dependencies:**
+>
+> * `flet` (GUI)
+> * `pandas` (data)
+> * `tkinter` (file/folder pickers)
+> * `openpyxl`, `xlsxwriter` (Excel I/O)
+
+---
+
+## 🎨 Project Structure / 项目结构 / Arquitectura del Código
 
 ```
 DocuFlowAggregator/
-├── intefaz.py      # Flet UI + handlers
-└── programGem.py     # CLI version
+├── .gitignore
+├── LICENSE
+├── README.md
+├── intefaz.py     # Flet + Tkinter GUI
+├── program.py
+├── programGem.py  # CLI versión
+└── requirements.tx
 ```
 
-- **intefaz.py**: Builds the window, buttons & status. / 界面及交互  
-- **programGem.py**: Loads Excel, shows menu, saves output. / 控制台脚本
+* **interfaz.py**: configura ventana, botones y diálogos GUI.
+* **programGem.py**: menú de consola, múltiples archivos, modo y carpeta de salida.
 
 ---
 
-## ✨ Core Functions / 核心函数
+## ✨ Core Functions / 核心函数 / Funciones Clave
 
 ### `clean_tipo_documento(tipo_doc_series)`
-- **What? / 功能**  
-  Strips leading digits/spaces from document-type strings.  
-  清除文档类型字段前置数字和空格。
-- **How? / 原理**  
-  Regex `r'^\d+\s*'` on a pandas Series.  
-  使用正则 `r'^\d+\s*'` 在 pandas Series 上替换。
-- **Returns / 返回**  
-  “Cleaned” pandas Series ready for grouping.  
-  清洗后的 Series，准备聚合。
+
+* **What?** Remove leading digits/spaces from `TIPO_DE_DOCUMENTO`.
+* **How?** Regex `r'^\d+\s*'` on a pandas Series.
+* **Returns:** Cleaned Series ready for grouping.
+
+### `process_data(df, mode, subtract_discount=False)` (CLI)
+
+* **Params:**
+
+  * `df` (DataFrame)
+  * `mode`: `"debito"` | `"credito"` | `"split"`
+  * `subtract_discount` (bool)
+* **Steps:**
+
+  1. **Filter** by `UNIDADES` or process all (`split`).
+  2. **Coerce** numeric (`MontoBruto`, `Descuento`, `IVA`) → fill NaN→ 0.
+  3. **Split** `MontoBruto` into positive/negative if `mode=='split'`.
+  4. **Consolidate** any “cliente/consumidor…final” → `CONSUMIDOR FINAL`.
+  5. **Clean** `TIPO_DE_DOCUMENTO` via `clean_tipo_documento`.
+  6. **Aggregate** sums & first-values.
+  7. **(Optional)** Subtract absolute `Descuento`.
+  8. **Select & reorder** final columns per mode.
+* **Returns:** Processed DataFrame (data or empty with headers).
+
+### `process_data_internal_sync(df_combined, mode)` (GUI)
+
+Same pipeline as CLI’s `process_data`—filter, consolidate, clean, aggregate—except split logic and discount applied after grouping, then hands back the DataFrame to the GUI for saving.
 
 ---
 
-### `process_data(df, mode)`
-- **Params / 参数**  
-  - `df` (`pd.DataFrame`): Original data / 原始数据  
-  - `mode` (`str`): `"debito"` (UNIDADES > 0) or `"credito"` (UNIDADES < 0)  
-- **Workflow / 流程**  
-  1. **Filter** by mode. / 根据模式筛选  
-  2. **Consolidate** any “cliente/consumidor…final” → `CONSUMIDOR FINAL`. / 合并“客户/消费者最终”  
-  3. **Clean** document type via `clean_tipo_documento`. / 清洗文档类型  
-  4. **Aggregate** sums & first-values. / 聚合求和与选首值  
-  5. **Rename & reorder** columns. / 重命名并重排列  
-- **Returns / 返回**  
-  - DataFrame with `['TIPO DE DOCUMENTO','IDENTIFICACION',…,'Iva']`.  
-    带有标准列的 DataFrame  
-  - Empty DataFrame with headers if no matching rows.  
-    无匹配时返回仅含表头的空 DataFrame  
+## 🖥️ GUI Usage (Flet) / 图形界面使用 / Uso GUI
 
----
-
-## 🖥️ GUI Usage (Flet) / 图形界面使用
-
-**English:**
 1. ```bash
-   python interface.py
+   python interfaz.py
    ```
-2. Click **Generate Debit** or **Generate Credit**.  
-3. Pick your `.xlsx`.  
-4. Choose output folder — done!  
-5. Status updates in real time: success, cancel, or errors.
+2. Choose one of three buttons:
 
-**中文：**
-1. ```bash
-   python interface.py
-   ```
-2. 点击 “生成 借记 报告” 或 “生成 贷记 报告”。  
-3. 选择 `.xlsx` 文件。  
-4. 指定输出目录 — 完成！  
-5. 实时显示状态：成功、取消或错误。
+   * **Generar reporte Débito**
+   * **Generar reporte Crédito**
+   * **Crear Informe Negativos y Positivos**
+3. Enter **number of files** via dialog.
+4. Pick each `.xlsx` file in turn.
+5. (If data exists) choose **“¿Restar descuento?”**
+6. Select **output folder**.
+7. See **real-time status** (color-coded: blue=working, green=success, red=error).
 
 ---
 
-## 💻 CLI Usage / 命令行使用
+## 💻 CLI Usage / 命令行使用 / Uso CLI
 
-**English:**
 1. ```bash
    python programGem.py
    ```
-2. Read prompt and choose:
-   ```
-   1. Debito (UNIDADES > 0)
-   2. Credito (UNIDADES < 0)
-   ```
-3. Outputs `output_debito.xlsx` or `output_credito.xlsx`.
-
-**中文：**
-1. ```bash
-   python programGem.py
-   ```
-2. 根据提示选择：
-   ```
-   1. 借记 (UNIDADES > 0)
-   2. 贷记 (UNIDADES < 0)
-   ```
-3. 在项目文件夹生成 `output_debito.xlsx` 或 `output_credito.xlsx`。
+2. **How many** Excel files? → enter `N`.
+3. **Enter** each file path one by one.
+4. **Mode?** (`debito` / `credito` / `split`)
+5. **Subtract discount?** (s/n)
+6. **Output folder?** (creates if needed)
+7. **Done:** look for `reporte_debito.xlsx` / `reporte_credito.xlsx` / `reporte_negativos_positivos.xlsx` in your folder.
 
 ---
 
-## 🎉 Example Flow / 示例流程
+## 🎉 Example Flows / 示例流程 / Ejemplos
 
-```bash
-$ python interface.py
-> What do you want to do today?
-[Generate Debit Report] [Generate Credit Report]
-…Selected Debit…
-> Select Excel for debit report…
-> Processing ventas_april.xlsx…
-> Processed successfully (125 rows). Choose export folder…
-> Saving to /home/user/reports/output_debito.xlsx…
-✅ Debit report generated!
+**GUI:**
+
 ```
+[Generar reporte Débito] → “¿Cuántos archivos?” → 2
+[File dialog x2] → “¿Restar descuento?” → Sí
+[Folder dialog] → ¡Reporte guardado con éxito!
+```
+
+**CLI:**
 
 ```bash
 $ python programGem.py
---- Sales Data Processing ---
-1. Debito (UNIDADES > 0)
-2. Credito (UNIDADES < 0)
-Enter choice (1 or 2): 1
-…Saving output_debito.xlsx…
-```
-
-```bash
-$ python programGem.py
-Error: Input file not found. Exiting.
-```
-
----
-
-## 🛠️ Customization / 定制与扩展
-
-- **Final-pattern**: adjust `final_pattern` for other aliases.  
-  修改 `final_pattern` 以适配更多别名。  
-- **Extra metrics**: add fields in `agg_dict` (e.g. `Cost`, `Margin`).  
-  在 `agg_dict` 中增添更多指标（如 成本、利润率）。  
-- **Dark theme**: `page.theme_mode = ft.ThemeMode.DARK`.  
-  使用深色模式：`page.theme_mode = ft.ThemeMode.DARK`。
-
----
-
-## ❓ FAQ / 常见问题
-
-> **Q: Extra columns in Excel?**  
-> The script ignores non-required columns and only checks essentials.
-
-> **问：如果 Excel 有额外列？**  
-> 脚本会忽略不需要的列，仅验证必需字段。
-
-> **Q: Support CSV?**  
-> Yes—use `pd.read_csv()` and pass the DataFrame to `process_data`.
-
-> **问：能处理 CSV 吗？**  
-> 可以：用 `pd.read_csv()` 读取后传入 `process_data`。
-
-> **Q: How to handle errors?**  
-> GUI shows red messages; CLI prints clear error origins.
-
-> **问：如何处理错误？**  
-> 界面会用红色提示；命令行会打印明确的错误信息。
-
----
-
-## 🎈 Contributing / 贡献指南
-
-1. **Fork** the repo.  
-2. Create `feature/your-improvement` branch.  
-3. Add tests under `tests/`.  
-4. Open a **Pull Request** describing your changes.
-
----
-
-Thank you for choosing **DocuFlowAggregator**! May every report tell a clear, ordered story of your sales. 🚀  
-感谢选择 **DocuFlowAggregator**！愿每份报告都清晰呈现您的销售故事。 🚀
-
-# Español
-
-## 🚀 Visión General
-
-¡Bienvenido a **DocuFlowAggregator**, tu asistente definitivo para generar reportes de ventas en modo **Débito** y **Crédito**! Este proyecto ofrece dos interfaces complementarias:
-
-- **Interfaz Gráfica** con **Flet** para una experiencia amigable y visual.  
-- **CLI (Línea de Comandos)** para los fanáticos del terminal, donde un par de líneas bastan para obtener tus reportes.
-
-Ambas versiones comparten la poderosa función de **procesamiento de datos** (`process_data`), diseñada para filtrar, limpiar y resumir transacciones con un solo comando. ¡Olvídate de las hojas de cálculo monótonas y dale un empujón creativo a tu flujo de trabajo!
-
----
-
-## 📦 Instalación
-
-1. **Clona este repositorio**  
-   ```bash
-   git clone https://github.com/miusarname2/DocuFlowAggregator_Cli-GUI
-   cd DocuFlowAggregator
-   ```
-
-2. **Crea y activa un entorno virtual**  
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # Linux/macOS
-   venv\Scripts\activate     # Windows
-   ```
-
-3. **Instala dependencias**  
-   ```bash
-   pip install -r requirements.txt
-   ```
-   > **Requisitos principales**:  
-   > - `flet` para la GUI  
-   > - `pandas` para manipulación de datos  
-   > - `tkinter` para diálogos de archivos
-
----
-
-## 🎨 Arquitectura del Código
-
-```
-DocuFlowAggregator/
-├── intefaz.py           # Interfaz Flet + handlers
-└── programGem.py           # Versión de consola
-```
-
-- **intefaz.py**: Monta la ventana, botones y mensajes de estado.  
-- **programGem.py**: Lee `example.xlsx`, muestra menú y guarda los resultados.
-
----
-
-## ✨ Funciones Clave
-
-### `clean_tipo_documento(tipo_doc_series)`
-- **¿Qué hace?**  
-  Elimina cualquier prefijo numérico y espacios en blanco en la columna de tipo de documento.
-- **Cómo lo hace:**  
-  Usa una expresión regular `r'^\d+\s*'` para descartar dígitos iniciales.  
-- **Devuelve:**  
-  Una serie de pandas con valores “limpios” listos para agrupar.
-
----
-
-### `process_data(df, mode)`
-- **Parámetros:**  
-  - `df` (`pd.DataFrame`): Datos originales.  
-  - `mode` (`str`): `"debito"` (UNIDADES > 0) o `"credito"` (UNIDADES < 0).
-- **Flujo interno:**
-  1. **Filtrado** según `mode`.  
-  2. **Consolidación** de cualquier nombre que coincida con patrón `(?i)(cliente|consumidor).*finall?` → “CONSUMIDOR FINAL”.  
-  3. **Limpieza** de la columna de documento con `clean_tipo_documento`.  
-  4. **Agregación**: suma de montos y toma del primer valor para identificadores y nombres.  
-  5. **Renombramiento** y **reordenamiento** de columnas (salida estandarizada).
-- **Retorna:**  
-  - DataFrame con columnas `['TIPO DE DOCUMENTO','IDENTIFICACION',…,'Iva']`.  
-  - En caso de no haber datos, un DataFrame vacío con los mismos encabezados.
-
----
-
-## 🖥️ Uso de la Interfaz Gráfica (Flet)
-
-1. **Ejecuta**:
-   ```bash
-   python intefaz.py
-   ```
-2. **Selecciona** “Generar reporte Débito” o “Crédito”.  
-3. **Escoge** tu archivo `.xlsx`.  
-4. **Elige** carpeta de destino y ¡listo!  
-5. Visualiza mensajes de estado en tiempo real: éxito, cancelación o errores.
-
----
-
-## 💻 Uso en Consola (CLI)
-
-1. **Ejecuta**:
-   ```bash
-   python programGem.py
-   ```
-2. Lee el mensaje de bienvenida y elige:
-   ```
-   1. Procesar 'Debito' (UNIDADES > 0)
-   2. Procesar 'Credito' (UNIDADES < 0)
-   ```
-3. El script crea `output_debito.xlsx` o `output_credito.xlsx` en la carpeta del proyecto.
-
----
-
-## 🎉 Ejemplo de Flujo
-
-```bash
-$ python intefaz.py
-> ¿Qué deseas hacer hoy?
-[Generar reporte Débito] [Generar reporte Crédito]
-...Seleccioné Débito...
-> Seleccione archivo Excel para el reporte de debito...
-> Leyendo y procesando datos desde ventas_abril.xlsx...
-> Procesado con éxito (125 registros). Seleccione carpeta de exportación...
-> Guardando archivo en: /home/usuario/reportes/output_debito.xlsx...
-¡Reporte de debito generado y guardado exitosamente!
+¿Cuántos archivos .xlsx? 3
+Ruta archivo 1: ventas_ene.xlsx
+Ruta archivo 2: ventas_feb.xlsx
+Ruta archivo 3: ventas_mar.xlsx
+Modo (debito/credito/split): split
+¿Restar descuento? (s/n): n
+Carpeta de salida: ./mis_reportes
+Reporte guardado en: ./mis_reportes/reporte_negativos_positivos.xlsx
 ```
 
 ---
 
-## 🛠️ Personalización y Extensión
+## 🛠️ Customization / 定制 / Personalización
 
-- **Patrones de cliente final**: modifica `final_pattern` para adaptarlo a otros alias.  
-- **Columnas adicionales**: incluye más métricas en `agg_dict` (por ejemplo, `Costo`, `Margen`).  
-- **Temas Flet**: prueba `page.theme_mode = ft.ThemeMode.DARK` para modo nocturno.
-
----
-
-## ❓ Preguntas Frecuentes
-
-> **¿Qué pasa si mi Excel tiene columnas extra?**  
-El script ignora columnas no requeridas. Sólo valida que estén las esenciales.
-
-> **¿Puedo procesar archivos CSV?**  
-Sí: lee el CSV con `pd.read_csv()` y pásalo a `process_data`.
-
-> **¿Cómo manejo errores?**  
-Revisa los mensajes en rojo en la GUI o en la consola; indican claramente el origen del fallo (columnas faltantes, archivo vacío, selección cancelada…).
+* **Adjust regex** for other “final” aliases in `final_pattern_regex`.
+* **Add metrics:** extend `agg_dict` (e.g. `Costo`, `Margen`).
+* **Dark theme GUI:** `page.theme_mode = ft.ThemeMode.DARK`.
 
 ---
 
-## 🎈 Contribuir
+## ⚠️ Known Issues / 已知问题 / Problemas Conocidos
 
-1. Haz un **fork** del repositorio.  
-2. Crea una rama `feature/tu-mejora`.  
-3. Añade tests unitarios en `tests/`.  
-4. Abre un **pull request** describiendo tu aporte.
+* Large Excel files (> 50 MB) → may be slow (in-memory).
+* On some Linux, install `python3-tk` for file dialogs.
+* Permissions: ensure write access to chosen output folder.
 
 ---
 
-¡Gracias por elegir **DocuFlowAggregator**! Que cada reporte sea una historia clara y ordenada de tus ventas. 🚀
+## 🎈 Contributing / 贡献 / Contribuir
+
+1. Fork this repo.
+2. Create `feature/your-tip` branch.
+3. Add tests under `tests/`.
+4. Submit PR with description of your changes.
+
+---
+
+Thank you for choosing **DocuFlowAggregator**! May your sales data always flow smoothly. 🚀
+感谢使用 **DocuFlowAggregator**！愿您的销售报表一帆风顺。 🚀
+¡Gracias por usar **DocuFlowAggregator**! Que tus reportes siempre te impulsen hacia el éxito. 🚀
