@@ -277,8 +277,25 @@ def process_data_internal_sync(df_combined, mode):
 
 # Global state to pass info between dialog steps in synchronous flow
 processing_state = {}
+license_dialog = None
+
+def open_license_dialog(e):
+    """Abre el diálogo de licencia usando la página del evento."""
+    dlg = license_dialog
+    if dlg:
+        e.page.dialog = dlg
+        e.page.open(dlg)
+        e.page.update()
+
+def close_license_dialog(e):
+    """Cierra el diálogo actual en la página del evento."""
+    if e.page.dialog and e.page.dialog.open:
+        e.page.dialog.open = False
+        e.page.dialog = None
+        e.page.update()
 
 def main(page: ft.Page):
+    global license_dialog
     page.title = "Generador de Reportes de Ventas"
     page.vertical_alignment = ft.MainAxisAlignment.CENTER
     page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
@@ -292,14 +309,45 @@ def main(page: ft.Page):
     root.withdraw()
     root.attributes('-topmost', True) # Ensure dialogs stay on top
 
+    license_dialog = ft.AlertDialog(
+            modal=True,
+            title=ft.Text("Licencia MIT"),
+            content=ft.Text(
+            "🔒 Licencia MIT / MIT License / MIT许可协议\n\n"
+            "🌐 Español:\n"
+            "Esta aplicación se distribuye bajo la licencia MIT, que otorga libertad total para usar, copiar, modificar, fusionar, publicar, distribuir, sublicenciar y/o vender copias del software. "
+            "Únicamente se requiere conservar este aviso de licencia en todas las copias o partes sustanciales del software.\n"
+            "Para más información sobre la licencia, consulte: https://github.com/miusarname2/DocuFlowAggregator_Cli-GUI/blob/master/LICENSE\n\n"
+
+            "🌐 English:\n"
+            "This application is distributed under the MIT License, which grants full permission to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the software. "
+            "The only requirement is to retain this license notice in all copies or substantial portions of the software.\n"
+            "For more information about the license, please visit: https://github.com/miusarname2/DocuFlowAggregator_Cli-GUI/blob/master/LICENSE\n\n"
+
+            "🌐 中文（简体）:\n"
+            "本应用程序依据 MIT 许可协议发布，您可以自由使用、复制、修改、合并、出版、分发、再授权和/或销售本软件的副本。"
+            "唯一的要求是在所有副本或实质性部分中保留本许可声明。\n"
+            "有关许可证的更多信息，请访问：https://github.com/miusarname2/DocuFlowAggregator_Cli-GUI/blob/master/LICENSE"
+        ),
+                    actions=[ft.TextButton("Cerrar", on_click=close_license_dialog)],
+            actions_alignment=ft.MainAxisAlignment.END
+        )
+    
+    # Botón Licencia
+    license_button = ft.TextButton(
+        "Licencia y Términos de Uso",
+        on_click=open_license_dialog
+    )
+
 
     # --- UI Controls ---
-    title = ft.Text(
-        "Generador de Reportes de Ventas",
-        size=28,
-        weight=ft.FontWeight.BOLD,
-        text_align=ft.TextAlign.CENTER,
-        color=ft.colors.PRIMARY
+    header = ft.Row([
+        ft.Text("Generador de Reportes de Ventas", size=28, weight=ft.FontWeight.BOLD),
+        license_button
+    ],
+        alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
+        vertical_alignment=ft.CrossAxisAlignment.CENTER,
+        width=page.window_width * 0.85
     )
     subtitle = ft.Text(
          "Seleccione el tipo de reporte y cargue los archivos",
@@ -867,7 +915,7 @@ def main(page: ft.Page):
         ft.Container(
              content=ft.Column(
                  [
-                     title,
+                     header,
                      subtitle,
                      ft.Container(height=20),
                      btn_debito,
