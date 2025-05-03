@@ -36,7 +36,7 @@ def process_data_internal_sync(df_combined, mode):
     """
     Función interna SÍNCRONA que filtra, limpia, agrupa y agrega los datos.
     Opera sobre un DataFrame combinado.
-    No realiza split ni resta de Descuento aquí.
+    Aplica la lógica de split antes de agrupar si el modo es 'split'.
     """
     print(f"[Proceso Datos] Iniciando procesamiento interno SÍNCRONO para '{mode}'...")
 
@@ -48,10 +48,12 @@ def process_data_internal_sync(df_combined, mode):
         missing = [col for col in required_cols if col not in df_combined.columns]
         print(f"[Proceso Datos] Error de Columnas: Faltan las siguientes columnas requeridas: {missing}")
         # Create an empty structure to pass back for consistent handling
-        intermediate_cols = ['NOMBRECLIENTE', 'IDENTIFICACION', 'TIPO DE DOCUMENTO',
+        # Use potential final columns for the empty error DataFrame structure
+        error_cols_structure = ['NOMBRECLIENTE', 'IDENTIFICACION', 'TIPO DE DOCUMENTO',
                                  'PRIMER_APELLIDO', 'SEGUNDO_APELLIDO', 'PRIMER_NOMBRE',
-                                 'OTROS_NOMBRES', 'MontoBruto', 'Descuento', 'Iva']
-        empty_df_with_error = pd.DataFrame(columns=intermediate_cols)
+                                 'OTROS_NOMBRES', 'MontoBruto', 'Descuento', 'Iva', # Columns for non-split
+                                 'MontoBruto Positivo', 'MontoBruto Negativo'] # Columns for split
+        empty_df_with_error = pd.DataFrame(columns=[col for col in error_cols_structure if col in df_combined.columns or col in ['ProcessingError'] + ['MontoBruto Positivo', 'MontoBruto Negativo', 'MontoBruto']]) # Include relevant ones + split specific
         empty_df_with_error['ProcessingError'] = f"Columnas requeridas faltantes: {missing}"
         return empty_df_with_error # Return empty structure with error info
 
@@ -73,15 +75,50 @@ def process_data_internal_sync(df_combined, mode):
 
         if df_filtered.empty:
             print(f"[Proceso Datos] No se encontraron registros que coincidan con el filtro ({mode}).")
-            intermediate_cols = ['NOMBRECLIENTE', 'IDENTIFICACION', 'TIPO DE DOCUMENTO',
+            # Return an empty DataFrame with potential output columns based on mode
+            if mode in ['debito', 'credito']:
+                 empty_cols = ['NOMBRECLIENTE', 'IDENTIFICACION', 'TIPO DE DOCUMENTO',
                                  'PRIMER_APELLIDO', 'SEGUNDO_APELLIDO', 'PRIMER_NOMBRE',
                                  'OTROS_NOMBRES', 'MontoBruto', 'Descuento', 'Iva']
-            return pd.DataFrame(columns=intermediate_cols)
+            elif mode == 'split':
+                 empty_cols = ['NOMBRECLIENTE', 'IDENTIFICACION', 'TIPO DE DOCUMENTO',
+                                 'PRIMER_APELLIDO', 'SEGUNDO_APELLIDO', 'PRIMER_NOMBRE',
+                                 'OTROS_NOMBRES', 'MontoBruto Positivo', 'MontoBruto Negativo', 'Descuento', 'Iva']
+            else:
+                 empty_cols = [] # Should be caught by the ValueError above
+
+            return pd.DataFrame(columns=empty_cols)
 
 
         print(f"[Proceso Datos] Filas encontradas para procesar después de filtrar ({mode}): {len(df_filtered)}")
 
-        # 1. Consolidar nombres específicos y patrones
+        # Ensure numeric conversions happen early for relevant columns
+        for col_sum in ['UNIDADES', 'MontoBruto', 'Descuento', 'IVA']:
+            if col_sum in df_filtered.columns:
+                 df_filtered[col_sum] = pd.to_numeric(df_filtered[col_sum], errors='coerce').fillna(0)
+        print("[Proceso Datos] Conversión a numérico aplicada.")
+
+
+        # --- Apply Split Logic *Before* Grouping (for split mode only) ---
+        # Initialize split columns for all modes to avoid KeyError during aggregation definition
+        df_filtered['MontoBruto Positivo_Temp'] = 0.0
+        df_filtered['MontoBruto Negativo_Temp'] = 0.0
+
+        if mode == 'split':
+            print("[Proceso Datos] Aplicando split de MontoBruto *antes* de agrupar para modo 'split'.")
+            # Populate the positive/negative columns based on ORIGINAL row MontoBruto
+            # Only do this if MontoBruto column actually exists
+            if 'MontoBruto' in df_filtered.columns:
+                df_filtered['MontoBruto Positivo_Temp'] = df_filtered['MontoBruto'].apply(lambda x: x if x > 0 else 0)
+                df_filtered['MontoBruto Negativo_Temp'] = df_filtered['MontoBruto'].apply(lambda x: x if x < 0 else 0)
+                # Drop the original MontoBruto column if it's not needed in final output for 'split'
+                # We need it for debito/credito, so drop conditionally after potential split logic
+                # df_filtered = df_filtered.drop(columns=['MontoBruto'], errors='ignore').copy() # Don't drop yet, handle in aggregation/selection
+            else:
+                 print("[Proceso Datos] Advertencia: Columna 'MontoBruto' no encontrada para aplicar split en modo 'split'.")
+
+
+        # 1. Consolidar nombres específicos y patrones (Apply AFTER filtering, BEFORE grouping)
         final_pattern_regex = r'(?i)(cliente|consumidor).*finall?'
         specific_names_to_consolidate_upper = [
             "CLIENTE CLIENTE".upper(),
@@ -99,60 +136,120 @@ def process_data_internal_sync(df_combined, mode):
         df_filtered.loc[total_consolidation_mask, 'NOMBRECLIENTE'] = 'CONSUMIDOR FINAL'
         print("[Proceso Datos] Consolidación de nombres aplicada.")
 
-        # 2. Limpiar TIPO_DE_DOCUMENTO
+        # 2. Limpiar TIPO_DE_DOCUMENTO (Apply AFTER filtering, BEFORE grouping)
         df_filtered['TIPO_DE_DOCUMENTO_CLEANED'] = clean_tipo_documento(df_filtered['TIPO_DE_DOCUMENTO'])
         print("[Proceso Datos] Limpieza de TIPO_DE_DOCUMENTO aplicada.")
 
-        # --- Aggregation and Renaming ---
-        group_keys = ['NOMBRECLIENTE', 'IDENTIFICACION']
 
+        # --- Aggregation Definition (Conditional based on mode) ---
+        group_keys = ['NOMBRECLIENTE', 'IDENTIFICACION'] # Group by name and ID for all modes
+
+        # Base aggregation dictionary for identity/name columns
         agg_dict = {
             'TIPO_DE_DOCUMENTO_CLEANED': 'first',
             'PRIMER_APELLIDO': 'first',
             'SEGUNDO_APELLIDO': 'first',
             'PRIMER_NOMBRE': 'first',
             'OTROS_NOMBRES': 'first',
-            'MontoBruto': 'sum',
             'Descuento': 'sum',
             'IVA': 'sum'
         }
 
-        for col_sum in ['MontoBruto', 'Descuento', 'IVA']:
-            df_filtered[col_sum] = pd.to_numeric(df_filtered[col_sum], errors='coerce').fillna(0)
+        # Add MontoBruto aggregation based on mode
+        if mode == 'split':
+            # For split, sum the new temporary positive/negative columns
+            agg_dict['MontoBruto Positivo_Temp'] = 'sum'
+            agg_dict['MontoBruto Negativo_Temp'] = 'sum'
+        else: # 'debito' or 'credito' modes
+            # For other modes, sum the original MontoBruto
+            agg_dict['MontoBruto'] = 'sum'
 
         print("[Proceso Datos] Agrupando por NOMBRECLIENTE e IDENTIFICACION...")
-        df_grouped = df_filtered.groupby(group_keys, as_index=False).agg(agg_dict)
+        # Ensure all columns in agg_dict and group_keys are actually in df_filtered before grouping
+        valid_agg_dict = {col: agg_func for col, agg_func in agg_dict.items() if col in df_filtered.columns}
+        valid_group_keys = [key for key in group_keys if key in df_filtered.columns]
+
+        if not valid_group_keys:
+             print("[Proceso Datos] Error: Columnas de agrupación (NOMBRECLIENTE, IDENTIFICACION) no encontradas.")
+             error_cols_structure = ['NOMBRECLIENTE', 'IDENTIFICACION', 'TIPO DE DOCUMENTO',
+                                 'PRIMER_APELLIDO', 'SEGUNDO_APELLIDO', 'PRIMER_NOMBRE',
+                                 'OTROS_NOMBRES', 'MontoBruto', 'Descuento', 'Iva',
+                                 'MontoBruto Positivo', 'MontoBruto Negativo']
+             empty_df_with_error = pd.DataFrame(columns=error_cols_structure)
+             empty_df_with_error['ProcessingError'] = "Columnas de agrupación (NOMBRECLIENTE, IDENTIFICACION) faltantes."
+             return empty_df_with_error
+
+
+        df_grouped = df_filtered.groupby(valid_group_keys, as_index=False).agg(valid_agg_dict)
         print(f"[Proceso Datos] Agrupación completada. Registros resultantes: {len(df_grouped)}")
 
+        # --- Renaming ---
         rename_map = {
             'TIPO_DE_DOCUMENTO_CLEANED': 'TIPO DE DOCUMENTO',
-            'IVA': 'Iva'
+            'IVA': 'Iva',
+            'MontoBruto Positivo_Temp': 'MontoBruto Positivo', # Rename temp columns to final names
+            'MontoBruto Negativo_Temp': 'MontoBruto Negativo'
         }
-        df_grouped = df_grouped.rename(columns=rename_map)
+        # Apply renaming, ignoring keys that are not in the grouped df columns
+        df_grouped = df_grouped.rename(columns={k:v for k,v in rename_map.items() if k in df_grouped.columns})
         print("[Proceso Datos] Columnas renombradas.")
 
-        # --- Final Selection/Ordering of INTERMEDIATE Columns ---
-        intermediate_cols_order = ['NOMBRECLIENTE', 'IDENTIFICACION', 'TIPO DE DOCUMENTO',
-                                   'PRIMER_APELLIDO', 'SEGUNDO_APELLIDO', 'PRIMER_NOMBRE',
-                                   'OTROS_NOMBRES', 'MontoBruto', 'Descuento', 'Iva']
 
-        cols_to_select = [col for col in intermediate_cols_order if col in df_grouped.columns]
-        final_df = df_grouped[cols_to_select].copy() # Use .copy() to avoid SettingWithCopyWarning
+        # --- Final Column Selection/Ordering (Conditional based on mode) ---
+        if mode in ['debito', 'credito']:
+             final_cols_order = [
+                 'TIPO DE DOCUMENTO', 'IDENTIFICACION', 'NOMBRECLIENTE', 'PRIMER_APELLIDO',
+                 'SEGUNDO_APELLIDO', 'PRIMER_NOMBRE', 'OTROS_NOMBRES', 'MontoBruto',
+                 'Descuento', 'Iva'
+             ]
+        elif mode == 'split':
+             final_cols_order = [
+                 'TIPO DE DOCUMENTO', 'IDENTIFICACION', 'NOMBRECLIENTE', 'PRIMER_APELLIDO',
+                 'SEGUNDO_APELLIDO', 'PRIMER_NOMBRE', 'OTROS_NOMBRES',
+                 'MontoBruto Positivo', 'MontoBruto Negativo', # Use the renamed columns
+                 'Descuento', 'Iva'
+             ]
+        else:
+             # Fallback, should not happen due to initial check
+             print(f"[Proceso Datos] Advertencia: Modo desconocido '{mode}' para definir columnas finales.")
+             final_cols_order = df_grouped.columns.tolist()
 
-        # Add back missing intermediate columns as NA
-        for col in intermediate_cols_order:
+        # Select and reorder, adding missing columns as NA
+        final_df = pd.DataFrame() # Start with an empty df for safety
+
+        # Add columns that are in the order list and the grouped df
+        cols_to_select_present = [col for col in final_cols_order if col in df_grouped.columns]
+        final_df = df_grouped[cols_to_select_present].copy()
+
+        # Add columns that are in the order list but NOT in the grouped df, filling with NA
+        # This ensures the structure is correct even if some columns are missing (e.g., all debit/credit are 0)
+        for col in final_cols_order:
              if col not in final_df.columns:
-                 final_df[col] = pd.NA # Use pandas' NA for missing values
+                 # Decide what default value makes sense. NA is often good, 0 might be better for numeric columns.
+                 # Let's use 0 for the MontoBruto/Descuento/Iva columns if they were expected but missing after grouping.
+                 if col in ['MontoBruto', 'MontoBruto Positivo', 'MontoBruto Negativo', 'Descuento', 'Iva']:
+                      final_df[col] = 0.0
+                 else:
+                     final_df[col] = pd.NA
 
-        # Reorder to ensure consistent order
-        final_df = final_df[intermediate_cols_order].copy()
+
+        # Ensure final order
+        final_df = final_df[final_cols_order].copy()
+
+        # Ensure numeric columns have float type for consistency, even if they were added as 0
+        numeric_cols_final = ['MontoBruto', 'MontoBruto Positivo', 'MontoBruto Negativo', 'Descuento', 'Iva']
+        for col in numeric_cols_final:
+             if col in final_df.columns:
+                  final_df[col] = pd.to_numeric(final_df[col], errors='coerce').fillna(0.0)
+
 
     except ValueError as ve:
          print(f"[Proceso Datos] Error de validación o datos durante el procesamiento interno de '{mode}': {ve}")
-         intermediate_cols = ['NOMBRECLIENTE', 'IDENTIFICACION', 'TIPO DE DOCUMENTO',
+         error_cols_structure = ['NOMBRECLIENTE', 'IDENTIFICACION', 'TIPO DE DOCUMENTO',
                                  'PRIMER_APELLIDO', 'SEGUNDO_APELLIDO', 'PRIMER_NOMBRE',
-                                 'OTROS_NOMBRES', 'MontoBruto', 'Descuento', 'Iva']
-         empty_df_with_error = pd.DataFrame(columns=intermediate_cols)
+                                 'OTROS_NOMBRES', 'MontoBruto', 'Descuento', 'Iva',
+                                 'MontoBruto Positivo', 'MontoBruto Negativo']
+         empty_df_with_error = pd.DataFrame(columns=error_cols_structure)
          empty_df_with_error['ProcessingError'] = str(ve)
          return empty_df_with_error
 
@@ -160,10 +257,11 @@ def process_data_internal_sync(df_combined, mode):
          print(f"[Proceso Datos] Error inesperado durante el procesamiento interno de '{mode}': {e}")
          import traceback
          traceback.print_exc()
-         intermediate_cols = ['NOMBRECLIENTE', 'IDENTIFICACION', 'TIPO DE DOCUMENTO',
+         error_cols_structure = ['NOMBRECLIENTE', 'IDENTIFICACION', 'TIPO DE DOCUMENTO',
                                  'PRIMER_APELLIDO', 'SEGUNDO_APELLIDO', 'PRIMER_NOMBRE',
-                                 'OTROS_NOMBRES', 'MontoBruto', 'Descuento', 'Iva']
-         empty_df_with_error = pd.DataFrame(columns=intermediate_cols)
+                                 'OTROS_NOMBRES', 'MontoBruto', 'Descuento', 'Iva',
+                                 'MontoBruto Positivo', 'MontoBruto Negativo']
+         empty_df_with_error = pd.DataFrame(columns=error_cols_structure)
          empty_df_with_error['ProcessingError'] = f"Unexpected error: {e}"
          return empty_df_with_error
 
@@ -172,6 +270,10 @@ def process_data_internal_sync(df_combined, mode):
     return final_df
 
 # --- Interfaz Gráfica (Flet Síncrona) ---
+# Resto del código de la interfaz gráfica (main, dialogs, handlers) permanece igual
+# porque ya maneja la posibilidad de que el DataFrame procesado tenga
+# las columnas 'MontoBruto Positivo' y 'MontoBruto Negativo' para el modo 'split'
+# y 'MontoBruto' para los otros modos.
 
 # Global state to pass info between dialog steps in synchronous flow
 processing_state = {}
@@ -487,30 +589,13 @@ def main(page: ft.Page):
                 print(f"DataFrame procesado está vacío. Columnas: {processed_df.columns.tolist()}")
                 # Still proceed to save stage, it will save an empty file with headers
                 print("[Flow] processed_df vacío. Procediendo directamente a guardar.")
+                # Pass the empty processed_df to save_results - it will generate the correct headers
                 save_results(page, processed_df)
             else:
-                 # If data is NOT empty, proceed with split (if needed) and ask about discount
-                 print("[Flow] processed_df contiene datos. Aplicando lógica de split y descuento si es necesario.")
-                 # --- Apply 'split' logic here before asking about discount ---
-                 if mode_type == 'split':
-                      print("[Flow] Modo es 'split'. Aplicando lógica de positivos/negativos.")
-                      update_status("Aplicando lógica de positivos/negativos...", ft.colors.BLUE_GREY_400)
-                       # Ensure MontoBruto exists and is numeric before splitting
-                      if 'MontoBruto' in processed_df.columns:
-                          processed_df['MontoBruto'] = pd.to_numeric(processed_df['MontoBruto'], errors='coerce').fillna(0)
-                           # Create temporary columns for positive and negative MontoBruto based on the AGGREGATED MontoBruto
-                          processed_df['MontoBruto Positivo'] = processed_df['MontoBruto'].apply(lambda x: x if x > 0 else 0)
-                          processed_df['MontoBruto Negativo'] = processed_df['MontoBruto'].apply(lambda x: x if x < 0 else 0)
-                           # Drop the original combined MontoBruto column now
-                          processed_df = processed_df.drop(columns=['MontoBruto']).copy() # Use copy()
-                          print("[Flow] Lógica de split aplicada.")
-                      else:
-                           print("[Flow] Advertencia: Columna 'MontoBruto' no encontrada para aplicar split.")
-
-                 # Update state with the potentially modified DataFrame (after split)
-                 processing_state['processed_df'] = processed_df
-
-                 # Now ask about discount
+                 # If data is NOT empty, ask about discount
+                 print("[Flow] processed_df contiene datos. Procediendo a preguntar sobre descuento.")
+                 # The split logic is now inside process_data_internal_sync *before* grouping for 'split' mode.
+                 # So we just need to ask about discount and then save.
                  print("[Flow] Llamando a show_subtract_discount_dialog")
                  show_subtract_discount_dialog(page)
 
@@ -532,10 +617,16 @@ def main(page: ft.Page):
     # Step 7: Show dialog asking about subtracting discount
     def show_subtract_discount_dialog(page):
          print('[Flow] show_subtract_discount_dialog iniciado')
+         # Use the correct wording based on the potential presence of split columns
+         mode_type = processing_state.get('mode', '')
+         discount_question = "¿Desea restar el valor del 'Descuento' del 'MontoBruto'?"
+         if mode_type == 'split':
+              discount_question = "¿Desea restar el valor del 'Descuento' de los 'MontoBruto Positivo' y 'MontoBruto Negativo'?"
+
          dialog = ft.AlertDialog(
              modal=True,
              title=ft.Text("Opciones de Procesamiento"),
-             content=ft.Text("¿Desea restar el valor del 'Descuento' del 'MontoBruto' (o sus partes, si aplica)?"),
+             content=ft.Text(discount_question),
              actions=[
                  ft.TextButton("No", on_click=lambda e: handle_subtract_discount_response(page, e, False)),
                  ft.TextButton("Sí", on_click=lambda e: handle_subtract_discount_response(page, e, True)),
@@ -554,7 +645,9 @@ def main(page: ft.Page):
     def handle_subtract_discount_response(page, e, subtract):
         print(f'[Flow] handle_subtract_discount_response iniciado. Restar descuento: {subtract}')
         # Check if dialog is the one we expect before closing
-        if page.dialog and isinstance(page.dialog.content, ft.Text) and "Desea restar el valor" in page.dialog.content.value:
+        # Check based on a keyword in the content text
+        dialog_content_text = page.dialog.content.value if page.dialog and page.dialog.content else ""
+        if "Desea restar el valor del 'Descuento'" in dialog_content_text:
              close_dialog(page.dialog)
         else:
             print("[Flow] Advertencia: Dialogo inesperado cerrado desde handler de descuento.")
@@ -571,13 +664,16 @@ def main(page: ft.Page):
              processing_state.clear()
              return
 
+        # Ensure Descuento is numeric and positive for subtraction
+        if 'Descuento' in processed_df.columns:
+             processed_df['Descuento'] = pd.to_numeric(processed_df['Descuento'], errors='coerce').fillna(0).abs()
+        else:
+             print("[Flow] Advertencia: Columna 'Descuento' no encontrada para restar.")
+             processed_df['Descuento'] = 0.0 # Add as 0 if missing to avoid errors
+
         if subtract is True:
              print("[Flow] Aplicando lógica de resta de Descuento.")
              update_status("Aplicando resta de Descuento...", ft.colors.BLUE_GREY_400)
-
-             # Ensure 'Descuento' is numeric before subtraction
-             # It should be numeric from process_data_internal_sync, but double-check
-             processed_df['Descuento'] = pd.to_numeric(processed_df['Descuento'], errors='coerce').fillna(0).abs()
 
              if mode_type in ['debito', 'credito']:
                   if 'MontoBruto' in processed_df.columns:
@@ -586,19 +682,27 @@ def main(page: ft.Page):
                   else:
                        print("[Flow] Advertencia: Columna 'MontoBruto' no encontrada para restar descuento en modo debito/credito.")
              elif mode_type == 'split':
+                  # Apply subtraction to both positive and negative columns if they exist
                   if 'MontoBruto Positivo' in processed_df.columns:
                        processed_df['MontoBruto Positivo'] = processed_df['MontoBruto Positivo'] - processed_df['Descuento']
                        print("[Flow] Resta de descuento aplicada a MontoBruto Positivo.")
                   else:
                        print("[Flow] Advertencia: Columna 'MontoBruto Positivo' no encontrada para restar descuento en modo split.")
+
                   if 'MontoBruto Negativo' in processed_df.columns:
                        processed_df['MontoBruto Negativo'] = processed_df['MontoBruto Negativo'] - processed_df['Descuento']
                        print("[Flow] Resta de descuento aplicada a MontoBruto Negativo.")
                   else:
                        print("[Flow] Advertencia: Columna 'MontoBruto Negativo' no encontrada para restar descuento en modo split.")
 
-             # Update the stored dataframe in state (even if no subtraction happened due to missing columns)
-             processing_state['processed_df'] = processed_df
+             # The Discount column itself should probably remain as the original discount value,
+             # not become 0 after subtraction, unless the requirement is to zero it out.
+             # Assuming it should remain, no change needed to processed_df['Descuento'] here.
+             # If it *should* be zeroed out, add: processed_df['Descuento'] = 0.0
+
+             # Update the stored dataframe in state
+             processing_state['processed_df'] = processed_df # processed_df is already modified in place
+
         else:
              print("[Flow] No se aplicará la resta de Descuento (usuario seleccionó No).")
 
@@ -634,13 +738,13 @@ def main(page: ft.Page):
              expected_final_columns = [
                  'TIPO DE DOCUMENTO', 'IDENTIFICACION', 'NOMBRECLIENTE', 'PRIMER_APELLIDO',
                  'SEGUNDO_APELLIDO', 'PRIMER_NOMBRE', 'OTROS_NOMBRES',
-                 'MontoBruto Positivo', 'MontoBruto Negativo',
+                 'MontoBruto Positivo', 'MontoBruto Negativo', # Use the actual column names from processing
                  'Descuento', 'Iva'
              ]
         else:
-             # Should not happen, but fallback to actual columns
+             # Should not happen, but fallback to actual columns if available, otherwise empty list
              print(f"[Flow] save_results: Modo desconocido '{mode_type}'. Usando columnas actuales.")
-             expected_final_columns = final_df.columns.tolist()
+             expected_final_columns = final_df.columns.tolist() if not final_df.empty else []
 
 
         update_status(f"Seleccione la carpeta de exportación para el reporte de {mode_display_name}...", ft.colors.ORANGE_ACCENT_700 if final_df.empty else ft.colors.GREEN_ACCENT_700)
@@ -676,21 +780,36 @@ def main(page: ft.Page):
             os.makedirs(output_folder, exist_ok=True)
 
             # Select and reorder columns for the final output
-            final_cols_present = [col for col in expected_final_columns if col in final_df.columns]
-            # Ensure empty DF gets correct headers based on expected columns, not just present ones from the error structure
-            df_to_save = final_df[final_cols_present].copy() if not final_df.empty else pd.DataFrame(columns=expected_final_columns)
+            # Use expected_final_columns for structure, even if df is empty
+            df_to_save = pd.DataFrame(columns=expected_final_columns)
+
+            if not final_df.empty:
+                 # Copy data for columns that are in both the expected list and the processed df
+                 for col in expected_final_columns:
+                     if col in final_df.columns:
+                         df_to_save[col] = final_df[col]
+                     # If col is in expected but not in final_df, it was created as 0.0 or pd.NA
+                     # by process_data_internal_sync, so it's already in final_df structure
+                     # unless final_df was an error DF. The error DF case is handled.
+
+                 # Ensure numeric columns are indeed numeric before saving
+                 numeric_cols_save = ['MontoBruto', 'MontoBruto Positivo', 'MontoBruto Negativo', 'Descuento', 'Iva']
+                 for col in numeric_cols_save:
+                     if col in df_to_save.columns:
+                          df_to_save[col] = pd.to_numeric(df_to_save[col], errors='coerce').fillna(0.0)
+
+
             print(f"[Flow] DataFrame para guardar preparado. Columnas finales: {df_to_save.columns.tolist()}. Está vacío: {df_to_save.empty}")
 
 
             with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
-                 # Pass df_to_save. If processed_df was empty, this will be empty with correct headers.
+                 # Pass df_to_save. It will have the correct structure based on expected_final_columns
                  df_to_save.to_excel(writer, index=False, sheet_name='Reporte')
             print("[Flow] Archivo Excel guardado exitosamente.")
 
 
-            if df_to_save.empty and final_df.empty:
-                # Check if the *original* processed_df was empty (meaning no data filtered in)
-                # not just if df_to_save became empty due to column selection (less likely)
+            # Check if the resulting dataframe to be saved was empty
+            if df_to_save.empty:
                  update_status(f"¡Reporte de {mode_display_name} (vacío con encabezados) guardado exitosamente en\n{output_path}!", ft.colors.GREEN_700)
                  print("[Flow] Mensaje final: Guardado vacío.")
             else:
