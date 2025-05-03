@@ -1,10 +1,39 @@
 import flet as ft
+
 import pandas as pd
-import tkinter as tk
-from tkinter import filedialog
+
+import tkinter as tk # Used for file dialogs
+
+from tkinter import filedialog # Used for file dialogs
+
 import re
+
 import os
+
 import sys
+
+
+
+# --- Dependency Check ---
+# Add error handling for missing required libraries outside of the main loop
+# This ensures a clear error message before Flet or Tkinter initializes fully
+try:
+    import flet as ft
+    import pandas as pd
+    import tkinter as tk
+    from tkinter import filedialog
+    import re
+    import os
+    import sys
+    # Check for xlsxwriter and openpyxl, which are good dependencies for Excel handling
+    import xlsxwriter # Used by pandas to_excel
+    import openpyxl  # Used by pandas read_excel
+except ImportError as e:
+    print(f"Error: Falta una biblioteca requerida: {e}")
+    print("Por favor, instale las bibliotecas necesarias usando pip:")
+    print("pip install flet pandas openpyxl xlsxwriter")
+    # Exit the program gracefully if essential libraries are missing
+    sys.exit(1)
 
 # --- Funciones de Procesamiento de Datos ---
 
@@ -12,6 +41,7 @@ def clean_tipo_documento(tipo_doc_series):
     """Limpia la serie 'TIPO_DE_DOCUMENTO' eliminando números y espacios al inicio."""
     # Asegura que la serie es de tipo string antes de aplicar regex
     return tipo_doc_series.astype(str).str.replace(r'^\d+\s*', '', regex=True)
+
 
 def process_data(df, mode):
     """
@@ -26,10 +56,12 @@ def process_data(df, mode):
 
     Returns:
         pd.DataFrame: Un DataFrame procesado y agrupado, o un DataFrame vacío con encabezados
-                      si no hay datos que coincidan con el filtro/criterio.
-        Raises:
-            ValueError: Si falta el modo o si el modo es inválido o si faltan columnas requeridas.
-            Exception: Para otros errores de procesamiento.
+                      si no hay datos que coincidan con el filtro/criterio o si ocurre un error
+                      en la selección de columnas.
+    Raises:
+        ValueError: Si falta el modo, si el modo es inválido, o si faltan columnas requeridas
+                    en el DataFrame de entrada.
+        Exception: Para otros errores de procesamiento no capturados específicamente.
     """
     print(f"Iniciando procesamiento para '{mode}'...")
 
@@ -43,177 +75,195 @@ def process_data(df, mode):
         missing = [col for col in required_cols if col not in df.columns]
         raise ValueError(f"Columnas requeridas faltantes en el archivo de entrada: {missing}")
 
+    df_processed = None # Initialize df_processed variable
+    final_df = pd.DataFrame() # Initialize final_df to an empty DataFrame
 
-    # --- Filtrado según el modo ---
-    if mode == 'debito':
-        print("Aplicando filtro: UNIDADES > 0")
-        df_processed = df[df['UNIDADES'] > 0].copy()
-        expected_final_columns = [
-            'TIPO DE DOCUMENTO', 'IDENTIFICACION', 'NOMBRECLIENTE', 'PRIMER_APELLIDO',
-            'SEGUNDO_APELLIDO', 'PRIMER_NOMBRE', 'OTROS_NOMBRES', 'MontoBruto',
-            'Descuento', 'Iva'
-        ]
-        # Columnas a agrupar y agregar (para modo 'debito'/'credito')
-        agg_dict_base = {
-            'TIPO_DE_DOCUMENTO_CLEANED': 'first',
-            'IDENTIFICACION': 'first',
-            'PRIMER_APELLIDO': 'first',
-            'SEGUNDO_APELLIDO': 'first',
-            'PRIMER_NOMBRE': 'first',
-            'OTROS_NOMBRES': 'first',
-            'MontoBruto': 'sum',
-            'Descuento': 'sum',
-            'IVA': 'sum'
-        }
-        # Mapa de renombre (para modo 'debito'/'credito')
-        rename_map_base = {
-            'TIPO_DE_DOCUMENTO_CLEANED': 'TIPO DE DOCUMENTO',
-            'IVA': 'Iva'
-        }
-
-
-    elif mode == 'credito':
-        print("Aplicando filtro: UNIDADES < 0")
-        df_processed = df[df['UNIDADES'] < 0].copy()
-        expected_final_columns = [
-            'TIPO DE DOCUMENTO', 'IDENTIFICACION', 'NOMBRECLIENTE', 'PRIMER_APELLIDO',
-            'SEGUNDO_APELLIDO', 'PRIMER_NOMBRE', 'OTROS_NOMBRES', 'MontoBruto',
-            'Descuento', 'Iva'
-        ]
-        # Columnas a agrupar y agregar (para modo 'debito'/'credito')
-        agg_dict_base = {
-            'TIPO_DE_DOCUMENTO_CLEANED': 'first',
-            'IDENTIFICACION': 'first',
-            'PRIMER_APELLIDO': 'first',
-            'SEGUNDO_APELLIDO': 'first',
-            'PRIMER_NOMBRE': 'first',
-            'OTROS_NOMBRES': 'first',
-            'MontoBruto': 'sum',
-            'Descuento': 'sum',
-            'IVA': 'sum'
-        }
-         # Mapa de renombre (para modo 'debito'/'credito')
-        rename_map_base = {
-            'TIPO_DE_DOCUMENTO_CLEANED': 'TIPO DE DOCUMENTO',
-            'IVA': 'Iva'
-        }
-
-
-    elif mode == 'split':
-        print("Procesando todos los registros para dividir MontoBruto.")
-        df_processed = df.copy() # Procesar todas las filas
-        expected_final_columns = [
-            'TIPO DE DOCUMENTO', 'IDENTIFICACION', 'NOMBRECLIENTE', 'PRIMER_APELLIDO',
-            'SEGUNDO_APELLIDO', 'PRIMER_NOMBRE', 'OTROS_NOMBRES',
-            'MontoBruto Positivo', 'MontoBruto Negativo', # Nuevas columnas aquí
-            'Descuento', 'Iva'
-        ]
-         # Columnas a agrupar y agregar (para modo 'split')
-        # Creamos columnas temporales para los Montos
-        # Aseguramos que MontoBruto es numérico antes de aplicar la lógica de positivo/negativo
-        df_processed['MontoBruto'] = pd.to_numeric(df_processed['MontoBruto'], errors='coerce').fillna(0)
-
-        df_processed['MontoBruto_Positivo'] = df_processed['MontoBruto'].apply(lambda x: x if x > 0 else 0)
-        df_processed['MontoBruto_Negativo'] = df_processed['MontoBruto'].apply(lambda x: x if x < 0 else 0)
-
-        agg_dict = {
-            'TIPO_DE_DOCUMENTO_CLEANED': 'first',
-            'IDENTIFICACION': 'first',
-            'PRIMER_APELLIDO': 'first',
-            'SEGUNDO_APELLIDO': 'first',
-            'PRIMER_NOMBRE': 'first',
-            'OTROS_NOMBRES': 'first',
-            'MontoBruto_Positivo': 'sum', # Suma de positivos
-            'MontoBruto_Negativo': 'sum', # Suma de negativos
-            'Descuento': 'sum',
-            'IVA': 'sum'
-        }
-        # Mapa de renombre (para modo 'split')
-        rename_map = {
-            'TIPO_DE_DOCUMENTO_CLEANED': 'TIPO DE DOCUMENTO',
-            'MontoBruto_Positivo': 'MontoBruto Positivo', # Renombrar columna temporal
-            'MontoBruto_Negativo': 'MontoBruto Negativo', # Renombrar columna temporal
-            'IVA': 'Iva'
-        }
-
-    else:
-        raise ValueError(f"Modo de procesamiento inválido especificado: '{mode}'. Use 'debito', 'credito' o 'split'.")
-
-
-    if df_processed.empty:
-        print(f"No se encontraron registros para procesar en modo '{mode}'.")
-        # Devolver un DataFrame vacío pero con los encabezados esperados para el modo actual
-        return pd.DataFrame(columns=expected_final_columns)
-
-    print(f"Filas encontradas para procesar: {len(df_processed)}")
-
-    # --- Pasos de Procesamiento (aplicados a df_processed) ---
-
-    # *** MODIFICACIÓN: Consolidar nombres específicos y patrones de cliente/consumidor final ***
-
-    # 1. Definir el patrón regex (existente)
-    final_pattern_regex = r'(?i)(cliente|consumidor).*finall?'
-
-    # 2. Definir la lista de nombres específicos a consolidar (CORREGIDO)
-    # Convertimos la lista a mayúsculas para hacer la comparación insensible a mayúsculas/minúsculas
-    specific_names_to_consolidate_upper = [
-        "CLIENTE CLIENTE".upper(),
-        "CLIENTE CONSUMIDOR CLIENTE CONSUMID CLIENTE CONSUMID".upper(), # La versión anterior (3 repeticiones)
-        "CLIENTE CONSUMIDOR CLIENTE CONSUMID CLIENTE CONSUMID CLIENTE CONSUMID".upper(), # La versión CORREGIDA (4 repeticiones)
-        "CLIENTE UNO".upper(),
-        "CLIENTES VARIOS CLIENTES VARIOS".upper(),
-        "CONSUMIDOR FINAL".upper() # Aseguramos que 'CONSUMIDOR FINAL' literal también se incluya
-    ]
-
-    # 3. Asegurar que la columna es de tipo string
-    df_processed['NOMBRECLIENTE'] = df_processed['NOMBRECLIENTE'].astype(str)
-
-    # 4. Crear máscara booleana para el patrón regex
-    mask_regex_match = df_processed['NOMBRECLIENTE'].str.contains(final_pattern_regex, na=False)
-
-    # 5. Crear máscara booleana para los nombres específicos (comparación insensible a mayúsculas/minúsculas)
-    mask_exact_match = df_processed['NOMBRECLIENTE'].str.upper().isin(specific_names_to_consolidate_upper)
-
-    # 6. Combinar las máscaras
-    total_consolidation_mask = mask_regex_match | mask_exact_match
-
-    # 7. Aplicar la consolidación
-    df_processed.loc[total_consolidation_mask, 'NOMBRECLIENTE'] = 'CONSUMIDOR FINAL'
-    print(f"Consolidación de 'CLIENTE FINAL'/'CONSUMIDOR FINAL' y nombres específicos aplicada.")
-
-    # 8. Limpiar TIPO_DE_DOCUMENTO
-    df_processed['TIPO_DE_DOCUMENTO_CLEANED'] = clean_tipo_documento(df_processed['TIPO_DE_DOCUMENTO'])
-    print("Limpieza de TIPO_DE_DOCUMENTO aplicada.")
-
-    # 9. Definir y aplicar diccionario de agregación basado en el modo
-    if mode in ['debito', 'credito']:
-         agg_dict = agg_dict_base
-         rename_map = rename_map_base
-    elif mode == 'split':
-         agg_dict = agg_dict_split
-         rename_map = rename_map_split
-
-    print(f"Agrupando por NOMBRECLIENTE y aplicando agregación para modo '{mode}'...")
-    df_grouped = df_processed.groupby('NOMBRECLIENTE', as_index=False).agg(agg_dict)
-    print(f"Agrupación completada. Registros resultantes: {len(df_grouped)}")
-
-    # 10. Renombrar columnas
-    df_grouped = df_grouped.rename(columns=rename_map)
-    print("Columnas renombradas.")
-
-    # 11. Seleccionar y Reordenar columnas según la lista de salida deseada para el modo actual
     try:
-        final_df = df_grouped[expected_final_columns]
-        print("Columnas seleccionadas y reordenadas.")
-    except KeyError as e:
-        print(f"Error: Columna faltante después de la agregación y renombramiento para modo '{mode}': {e}.")
-        print(f"Columnas esperadas: {expected_final_columns}")
-        print(f"Columnas disponibles después de agrupar y renombrar: {df_grouped.columns.tolist()}")
-        # Devolver un DataFrame vacío con headers esperados en caso de error
-        return pd.DataFrame(columns=expected_final_columns)
+        # --- Mode-Specific Filtering, Column Preparation, Aggregation, Renaming, and Selection ---
+        if mode == 'debito':
+            print("Aplicando filtro: UNIDADES > 0")
+            df_processed = df[df['UNIDADES'] > 0].copy() # Filter and create a copy
+
+            expected_final_columns = [
+                'TIPO DE DOCUMENTO', 'IDENTIFICACION', 'NOMBRECLIENTE', 'PRIMER_APELLIDO',
+                'SEGUNDO_APELLIDO', 'PRIMER_NOMBRE', 'OTROS_NOMBRES', 'MontoBruto',
+                'Descuento', 'Iva'
+            ]
+
+            # Check if data remains after filtering
+            if df_processed.empty:
+                print(f"No se encontraron registros con UNIDADES > 0.")
+                # Return empty df with expected headers
+                return pd.DataFrame(columns=expected_final_columns)
+
+            # Define aggregation and rename maps for this mode
+            agg_dict = {
+                'TIPO_DE_DOCUMENTO_CLEANED': 'first',
+                'IDENTIFICACION': 'first',
+                'PRIMER_APELLIDO': 'first',
+                'SEGUNDO_APELLIDO': 'first',
+                'PRIMER_NOMBRE': 'first',
+                'OTROS_NOMBRES': 'first',
+                'MontoBruto': 'sum',
+                'Descuento': 'sum',
+                'IVA': 'sum'
+            }
+            rename_map = {
+                'TIPO_DE_DOCUMENTO_CLEANED': 'TIPO DE DOCUMENTO',
+                'IVA': 'Iva'
+            }
+
+
+        elif mode == 'credito':
+            print("Aplicando filtro: UNIDADES < 0")
+            df_processed = df[df['UNIDADES'] < 0].copy() # Filter and create a copy
+
+            expected_final_columns = [
+                'TIPO DE DOCUMENTO', 'IDENTIFICACION', 'NOMBRECLIENTE', 'PRIMER_APELLIDO',
+                'SEGUNDO_APELLIDO', 'PRIMER_NOMBRE', 'OTROS_NOMBRES', 'MontoBruto',
+                'Descuento', 'Iva'
+            ]
+
+            # Check if data remains after filtering
+            if df_processed.empty:
+                 print(f"No se encontraron registros con UNIDADES < 0.")
+                 return pd.DataFrame(columns=expected_final_columns)
+
+            # Define aggregation and rename maps for this mode
+            agg_dict = {
+                'TIPO_DE_DOCUMENTO_CLEANED': 'first',
+                'IDENTIFICACION': 'first',
+                'PRIMER_APELLIDO': 'first',
+                'SEGUNDO_APELLIDO': 'first',
+                'PRIMER_NOMBRE': 'first',
+                'OTROS_NOMBRES': 'first',
+                'MontoBruto': 'sum',
+                'Descuento': 'sum',
+                'IVA': 'sum'
+            }
+            rename_map = {
+                'TIPO_DE_DOCUMENTO_CLEANED': 'TIPO DE DOCUMENTO',
+                'IVA': 'Iva'
+            }
+
+
+        elif mode == 'split':
+            print("Procesando todos los registros para dividir MontoBruto.")
+            df_processed = df.copy() # Process all rows, create a copy
+
+            expected_final_columns = [
+                'TIPO DE DOCUMENTO', 'IDENTIFICACION', 'NOMBRECLIENTE', 'PRIMER_APELLIDO',
+                'SEGUNDO_APELLIDO', 'PRIMER_NOMBRE', 'OTROS_NOMBRES',
+                'MontoBruto Positivo', 'MontoBruto Negativo', # Split columns here
+                'Descuento', 'Iva'
+            ]
+
+            # Check if data remains (should always have data unless input was empty)
+            if df_processed.empty:
+                print("El DataFrame de entrada está vacío para el modo 'split'.")
+                return pd.DataFrame(columns=expected_final_columns)
+
+            # Ensure MontoBruto is numeric BEFORE splitting
+            df_processed['MontoBruto'] = pd.to_numeric(df_processed['MontoBruto'], errors='coerce').fillna(0)
+
+            # Create temporary columns for positive and negative MontoBruto
+            df_processed['MontoBruto_Positivo_temp'] = df_processed['MontoBruto'].apply(lambda x: x if x > 0 else 0)
+            df_processed['MontoBruto_Negativo_temp'] = df_processed['MontoBruto'].apply(lambda x: x if x < 0 else 0)
+
+            # Define aggregation and rename maps for this mode (using temporary column names)
+            agg_dict = {
+                'TIPO_DE_DOCUMENTO_CLEANED': 'first',
+                'IDENTIFICACION': 'first',
+                'PRIMER_APELLIDO': 'first',
+                'SEGUNDO_APELLIDO': 'first',
+                'PRIMER_NOMBRE': 'first',
+                'OTROS_NOMBRES': 'first',
+                'MontoBruto_Positivo_temp': 'sum', # Sum the temporary positive column
+                'MontoBruto_Negativo_temp': 'sum', # Sum the temporary negative column
+                'Descuento': 'sum',
+                'IVA': 'sum'
+            }
+            rename_map = {
+                'TIPO_DE_DOCUMENTO_CLEANED': 'TIPO DE DOCUMENTO',
+                'MontoBruto_Positivo_temp': 'MontoBruto Positivo', # Rename the temporary column
+                'MontoBruto_Negativo_temp': 'MontoBruto Negativo', # Rename the temporary column
+                'IVA': 'Iva'
+            }
+
+        else:
+            # This case should be caught by the initial validation, but good to have
+            raise ValueError(f"Modo de procesamiento inválido especificado: '{mode}'. Use 'debito', 'credito' o 'split'.")
+
+        # --- Common Processing Steps (applied to df_processed before aggregation) ---
+        # These steps are now INSIDE each mode's block before the groupby call
+
+        print(f"Filas encontradas para procesar después de filtrar ({mode}): {len(df_processed)}")
+
+        # 1. Consolidar nombres específicos y patrones de cliente/consumidor final
+        final_pattern_regex = r'(?i)(cliente|consumidor).*finall?'
+        # Keep the corrected specific names list
+        specific_names_to_consolidate_upper = [
+            "CLIENTE CLIENTE".upper(),
+            "CLIENTE CONSUMIDOR CLIENTE CONSUMID CLIENTE CONSUMID".upper(),
+            "CLIENTE CONSUMIDOR CLIENTE CONSUMID CLIENTE CONSUMID CLIENTE CONSUMID".upper(), # Version with 4 repeats
+            "CLIENTE UNO".upper(),
+            "CLIENTES VARIOS CLIENTES VARIOS".upper(),
+            "CONSUMIDOR FINAL".upper() # Ensure 'CONSUMIDOR FINAL' literal is included
+        ]
+
+        df_processed['NOMBRECLIENTE'] = df_processed['NOMBRECLIENTE'].astype(str) # Ensure string type
+        mask_regex_match = df_processed['NOMBRECLIENTE'].str.contains(final_pattern_regex, na=False)
+        mask_exact_match = df_processed['NOMBRECLIENTE'].str.upper().isin(specific_names_to_consolidate_upper)
+        total_consolidation_mask = mask_regex_match | mask_exact_match
+        df_processed.loc[total_consolidation_mask, 'NOMBRECLIENTE'] = 'CONSUMIDOR FINAL'
+        print(f"Consolidación de 'CLIENTE FINAL'/'CONSUMIDOR FINAL' y nombres específicos aplicada.")
+
+        # 2. Limpiar TIPO_DE_DOCUMENTO
+        df_processed['TIPO_DE_DOCUMENTO_CLEANED'] = clean_tipo_documento(df_processed['TIPO_DE_DOCUMENTO'])
+        print("Limpieza de TIPO_DE_DOCUMENTO aplicada.")
+
+        # --- Perform Aggregation, Renaming, and Final Selection (Using maps defined IN the block) ---
+        print(f"Agrupando por NOMBRECLIENTE y aplicando agregación para modo '{mode}'...")
+        df_grouped = df_processed.groupby('NOMBRECLIENTE', as_index=False).agg(agg_dict)
+        print(f"Agrupación completada. Registros resultantes: {len(df_grouped)}")
+
+        df_grouped = df_grouped.rename(columns=rename_map)
+        print("Columnas renombradas.")
+
+        # 3. Select and Reorder columns based on the expected list for the current mode
+        # This needs careful checking against the columns that *exist* in df_grouped *after* renaming.
+        try:
+            # Ensure all expected columns are in df_grouped *before* selecting
+            missing_final_cols = [col for col in expected_final_columns if col not in df_grouped.columns]
+            if missing_final_cols:
+                 # This shouldn't happen if rename_map is correct, but good defense
+                 raise KeyError(f"Columnas finales esperadas no encontradas después de renombrar: {missing_final_cols}")
+
+            final_df = df_grouped[expected_final_columns]
+            print("Columnas seleccionadas y reordenadas.")
+
+        except KeyError as e:
+            # This error handler is now specifically for the final column selection step
+            print(f"Error seleccionando/reordenando columnas finales para modo '{mode}': {e}.")
+            print(f"Columnas esperadas: {expected_final_columns}")
+            print(f"Columnas disponibles después de agrupar y renombrar: {df_grouped.columns.tolist()}")
+            # Return an empty DataFrame with the *attempted* expected headers in case of error
+            return pd.DataFrame(columns=expected_final_columns)
+
+
+    except ValueError as ve: # Catch specific ValueErrors (like missing columns in input)
+         print(f"Error de validación o datos durante el procesamiento de '{mode}': {ve}")
+         raise ve # Re-raise the ValueError so the UI handler can catch it
+
+    except Exception as e: # Catch any other unexpected processing errors
+         print(f"Error inesperado durante el procesamiento de '{mode}': {e}")
+         # Log the traceback for debugging server-side (console)
+         import traceback
+         traceback.print_exc()
+         raise e # Re-raise the general exception
 
     print(f"Procesamiento para '{mode}' finalizado exitosamente.")
-    return final_df
+    return final_df # Return the result from process_data
 
 
 # --- Interfaz Gráfica (Flet) ---
@@ -223,7 +273,7 @@ def main(page: ft.Page):
     page.vertical_alignment = ft.MainAxisAlignment.CENTER
     page.horizontal_alignment = ft.CrossAxisAlignment.CENTER
     page.window_width = 550
-    page.window_height = 550 # Increased height to fit the new button
+    page.window_height = 600 # Slightly more height might be nice
     page.padding = 30
     page.theme_mode = ft.ThemeMode.LIGHT
 
@@ -231,25 +281,41 @@ def main(page: ft.Page):
     # Tkinter dialogs need a root window, but we don't want to show it
     root = tk.Tk()
     root.withdraw() # Hide the main Tkinter window
+    # Prevent the hidden Tkinter window from blocking the main thread
+    root.attributes('-topmost', True) # Keep dialogs on top
 
     # --- UI Controls ---
     title = ft.Text(
-        "¿Qué deseas hacer hoy?",
+        "Generador de Reportes de Ventas",
         size=28,
         weight=ft.FontWeight.BOLD,
         text_align=ft.TextAlign.CENTER,
         color=ft.colors.PRIMARY
     )
+    subtitle = ft.Text(
+         "Seleccione el tipo de reporte a generar",
+         size=16,
+         text_align=ft.TextAlign.CENTER,
+         color=ft.colors.BLACK87
+    )
+
 
     status_text = ft.Text(
         "", # Initial empty message
         size=14,
         color=ft.colors.BLACK54, # Neutral color initially
-        text_align=ft.TextAlign.CENTER
+        text_align=ft.TextAlign.CENTER,
+        selectable=True # Allow copying error messages
+    )
+    status_container = ft.Container(
+        status_text,
+        alignment=ft.alignment.center,
+        padding=ft.padding.symmetric(vertical=10),
+        width=page.window_width * 0.8 # Give status text a bit more room
     )
 
+
     # --- Button Handler Function ---
-    # This function will handle clicks from all buttons based on the 'mode' parameter
     def handle_generate_report(mode_type):
         # Map internal mode to display name and filename suffix
         mode_display_name = {
@@ -264,7 +330,7 @@ def main(page: ft.Page):
         # Disable all buttons during processing
         btn_debito.disabled = True
         btn_credito.disabled = True
-        btn_split.disabled = True # Disable the new button too
+        btn_split.disabled = True
         page.update()
 
         processed_df = None # Variable to hold the result DataFrame
@@ -285,10 +351,10 @@ def main(page: ft.Page):
                 return # Exit handler if cancelled
 
             if not input_file.lower().endswith('.xlsx'):
-                 status_text.value = f"Error: El archivo seleccionado '{os.path.basename(input_file)}' no es un archivo .xlsx válido."
-                 status_text.color = ft.colors.RED_ACCENT_700
-                 page.update()
-                 return # Exit handler if invalid file type
+                status_text.value = f"Error: El archivo seleccionado '{os.path.basename(input_file)}' no es un archivo .xlsx válido."
+                status_text.color = ft.colors.RED_ACCENT_700
+                page.update()
+                return # Exit handler if invalid file type
 
             status_text.value = f"Leyendo y procesando datos para reporte de {mode_display_name} desde {os.path.basename(input_file)}..."
             status_text.color = ft.colors.BLUE_ACCENT_700
@@ -296,9 +362,10 @@ def main(page: ft.Page):
 
             # 2. Read and Process data
             try:
-                df = pd.read_excel(input_file)
+                # Added explicit engine as a safeguard, though openpyxl is default for .xlsx
+                df = pd.read_excel(input_file, engine='openpyxl')
 
-                # Pass the mode_type ('debito', 'credito', 'split') directly to process_data
+                # Call the core processing function
                 processed_df = process_data(df, mode_type)
 
             except pd.errors.EmptyDataError:
@@ -306,39 +373,32 @@ def main(page: ft.Page):
                 status_text.color = ft.colors.RED_ACCENT_700
                 page.update()
                 return # Exit handler if file is empty
-            except ValueError as ve: # Catch specific ValueError for missing columns or invalid mode
-                 status_text.value = f"Error en datos o configuración: {ve}"
+            except ValueError as ve: # Catch specific ValueErrors raised by process_data
+                status_text.value = f"Error de datos o formato en el archivo: {ve}"
+                status_text.color = ft.colors.RED_ACCENT_700
+                page.update()
+                return # Exit handler on specific processing error
+            except KeyError as ke: # Catch potential KeyErrors if columns issues persist
+                 status_text.value = f"Error en el archivo: Columnas no encontradas o inesperadas: {ke}"
                  status_text.color = ft.colors.RED_ACCENT_700
                  page.update()
-                 return # Exit handler on specific processing error
-            except Exception as e:
-                status_text.value = f"Error inesperado durante la lectura/procesamiento: {e}"
+                 return
+            except Exception as e: # Catch any other unexpected processing errors
+                status_text.value = f"Error inesperado durante el procesamiento del archivo: {e}"
                 status_text.color = ft.colors.RED_ACCENT_700
+                # Print traceback to console for detailed debugging
+                import traceback
+                traceback.print_exc()
                 page.update()
                 return # Exit handler on general processing error
 
 
-            # Handle cases where process_data returned no data but potentially headers
-            if processed_df.empty:
-                 if processed_df.columns.empty:
-                    status_text.value = f"Procesado: No se generaron datos ni encabezados para guardar."
-                    status_text.color = ft.colors.RED_ACCENT_700
-                    page.update()
-                    return # Exit handler if nothing to save
-                 else:
-                    status_text.value = f"Procesado: No se encontraron registros que cumplan el criterio para el reporte de {mode_display_name}. Seleccione carpeta para guardar archivo vacío con encabezados."
-                    status_text.color = ft.colors.ORANGE_ACCENT_700
-                    page.update()
-                    # Continue to save empty file with headers
-
-
-            else: # Data was processed and is not empty
-                status_text.value = f"Procesado con éxito ({len(processed_df)} registros). Seleccione la carpeta de exportación para el reporte de {mode_display_name}..."
-                status_text.color = ft.colors.GREEN_ACCENT_700
-                page.update()
-
-
             # 3. Select output folder (Tkinter)
+            # Always ask for output folder, even if df is empty, to save headers
+            status_text.value = f"Procesado. Seleccione la carpeta de exportación para el reporte de {mode_display_name}..."
+            status_text.color = ft.colors.ORANGE_ACCENT_700 if processed_df.empty else ft.colors.GREEN_ACCENT_700
+            page.update()
+
             output_folder = filedialog.askdirectory(
                 title=f"Seleccionar Carpeta de Exportación ({mode_display_name})",
                 parent=root # Attach to hidden root
@@ -351,7 +411,6 @@ def main(page: ft.Page):
                 return # Exit handler if cancelled
 
             # 4. Save processed data
-            # Determine output filename based on mode
             output_filename = {
                 'debito': 'reporte_debito.xlsx',
                 'credito': 'reporte_credito.xlsx',
@@ -360,27 +419,41 @@ def main(page: ft.Page):
 
             output_path = os.path.join(output_folder, output_filename)
 
-            status_text.value = f"Guardando archivo en: {output_path}..."
+            status_text.value = f"Guardando archivo en:\n{output_path}"
             status_text.color = ft.colors.BLUE_GREY_400
             page.update()
 
             try:
-                # Use ExcelWriter for potentially better handling of large files or future multiple sheets
+                # Use ExcelWriter, recommended for Pandas to Excel
+                # Ensure directory exists - though askdirectory usually ensures this.
+                os.makedirs(output_folder, exist_ok=True)
                 with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
+                     # Pass df, even if empty, to save headers
                      processed_df.to_excel(writer, index=False, sheet_name='Reporte')
 
-                status_text.value = f"¡Reporte de {mode_display_name} generado y guardado exitosamente en\n{output_path}!"
-                status_text.color = ft.colors.GREEN
+                # Final success message based on if data was saved
+                if processed_df.empty:
+                     status_text.value = f"¡Reporte de {mode_display_name} (vacío con encabezados) guardado exitosamente en\n{output_path}!"
+                else:
+                     status_text.value = f"¡Reporte de {mode_display_name} generado y guardado exitosamente en\n{output_path}!"
 
-            except Exception as e:
-                status_text.value = f"Error al guardar el archivo: {e}"
-                status_text.color = ft.colors.RED
+                status_text.color = ft.colors.GREEN_700
+
+
+            except Exception as e: # Catch saving errors
+                status_text.value = f"Error al guardar el archivo:\n{e}"
+                status_text.color = ft.colors.RED_700
+                # Print traceback to console for detailed debugging
+                import traceback
+                traceback.print_exc()
+
             finally:
                 # Always update page to show final status message
-                 page.update()
+                page.update()
 
-        except Exception as e: # Catch any other unexpected errors in the process flow
-            status_text.value = f"Ocurrió un error inesperado en el flujo de la aplicación: {e}"
+
+        except Exception as e: # Catch any other unexpected errors in the process flow (e.g., from file dialogs)
+            status_text.value = f"Ocurrió un error inesperado en el flujo de la aplicación:\n{e}"
             status_text.color = ft.colors.RED_ACCENT_700
             # Also print to console for debugging
             import traceback
@@ -399,24 +472,23 @@ def main(page: ft.Page):
     btn_debito = ft.ElevatedButton(
         "Generar reporte Debito",
         on_click=lambda e: handle_generate_report('debito'), # Pass 'debito' mode
-        width=300, # Increased width slightly for potentially longer text
+        width=350, # Give buttons a consistent, reasonable width
         height=50,
-        icon=ft.icons.ARROW_UPWARD_ROUNDED # Icon suggestive of Debito
+        icon=ft.icons.ARROW_UPWARD_ROUNDED
     )
 
     btn_credito = ft.ElevatedButton(
         "Generar reporte Credito",
         on_click=lambda e: handle_generate_report('credito'), # Pass 'credito' mode
-        width=300, # Increased width slightly
+        width=350,
         height=50,
-        icon=ft.icons.ARROW_DOWNWARD_ROUNDED # Icon suggestive of Credito
+        icon=ft.icons.ARROW_DOWNWARD_ROUNDED
     )
 
-    # --- New Button for Split Report ---
     btn_split = ft.ElevatedButton(
         "Crear Informe Negativos y Positivos",
         on_click=lambda e: handle_generate_report('split'), # Pass 'split' mode
-        width=300, # Consistent width
+        width=350,
         height=50,
         icon=ft.icons.BALANCE # Icon suggestive of balancing/splitting
     )
@@ -426,45 +498,34 @@ def main(page: ft.Page):
     page.add(
         ft.Container( # Use a container for styling and centering
              content=ft.Column(
-                [
-                    title,
-                    ft.Container(height=20), # Spacer
-                    btn_debito,
-                    btn_credito,
-                    btn_split, # Add the new button here
-                    ft.Container(height=30), # Spacer
-                    status_text, # Area to display status messages
-                ],
-                horizontal_alignment=ft.CrossAxisAlignment.CENTER,
-                spacing=15, # Space between controls in the column
+                 [
+                     title,
+                     subtitle,
+                     ft.Container(height=30), # Spacer
+                     btn_debito,
+                     btn_credito,
+                     btn_split, # Add the new button here
+                     ft.Container(height=40), # Spacer
+                     status_container, # Use the container for status text
+                 ],
+                 horizontal_alignment=ft.CrossAxisAlignment.CENTER,
+                 spacing=15, # Space between controls in the column
+                 tight=True # Keep column compact
              ),
              padding=ft.padding.all(20),
-             alignment=ft.alignment.center,
+             alignment=ft.alignment.top_center, # Align column to top-center within container
              width=page.window_width, # Ensure container uses available width
              height=page.window_height # Ensure container uses available height
         )
     )
 
+    # Initial state message
+    status_text.value = "Listo para comenzar. Seleccione una opción."
+    status_text.color = ft.colors.BLACK54
+    page.update()
+
 
 # --- Ejecutar la Aplicación Flet ---
 if __name__ == "__main__":
-    # Add error handling for missing required libraries
-    try:
-        import flet as ft
-        import pandas as pd
-        import tkinter as tk
-        from tkinter import filedialog
-        import re
-        import os
-        import sys
-        # Check for xlsxwriter, which is needed for pd.ExcelWriter
-        import xlsxwriter
-        import openpyxl # Also good practice for reading xlsx
-    except ImportError as e:
-        print(f"Error: Missing required library: {e}")
-        print("Please install required libraries using pip:")
-        print("pip install flet pandas openpyxl xlsxwriter")
-        sys.exit(1) # Exit if libraries are missing
-
-
+    # The dependency check has been moved before this block
     ft.app(target=main)
